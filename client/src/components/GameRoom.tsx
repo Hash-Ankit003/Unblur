@@ -498,6 +498,7 @@ export default function GameRoom({
                   className={`max-h-[380px] w-auto max-w-full rounded-2xl object-contain shadow-2xl select-none transition-all duration-500 ease-out ${
                     fadeTrigger ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
                   }`}
+                  style={{ imageRendering: 'pixelated' }}
                   draggable={false}
                 />
               </div>

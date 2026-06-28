@@ -15,7 +15,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors({
-  origin: '*', // For local dev, allow any origin
+  origin: true, // Echoes back requesting origin (required for credentialed requests)
+  credentials: true,
   methods: ['GET', 'POST']
 }));
 
@@ -23,11 +24,20 @@ app.use(cors({
 const publicFolder = path.join(__dirname, '..', 'public');
 app.use(express.static(publicFolder));
 
+// Add root health-check endpoint for Render
+app.get('/', (req, res) => {
+  res.send({ status: 'healthy', message: 'Unblur Backend Server is running.' });
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: (requestOrigin, callback) => {
+      // Reflect whatever origin is calling us to prevent CORS blocks
+      callback(null, true);
+    },
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 

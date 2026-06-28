@@ -488,14 +488,15 @@ export default function GameRoom({
                   <img
                     src={prevImg}
                     alt="Previous Stage"
-                    className="absolute max-h-[380px] w-auto max-w-full rounded-2xl object-contain select-none opacity-45 blur-[1.5px]"
+                    className="absolute max-h-[380px] w-full rounded-2xl object-contain select-none opacity-45 blur-[1.5px]"
+                    style={{ imageRendering: 'pixelated' }}
                     draggable={false}
                   />
                 )}
                 <img
                   src={currImg}
                   alt="Guess Target"
-                  className={`max-h-[380px] w-auto max-w-full rounded-2xl object-contain shadow-2xl select-none transition-all duration-500 ease-out ${
+                  className={`max-h-[380px] w-full rounded-2xl object-contain shadow-2xl select-none transition-all duration-500 ease-out ${
                     fadeTrigger ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
                   }`}
                   style={{ imageRendering: 'pixelated' }}

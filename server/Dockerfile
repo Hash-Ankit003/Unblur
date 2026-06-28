@@ -2,17 +2,17 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy lock files and package.json files
+# Copy package files
 COPY package*.json ./
 
-# Install packages
-RUN npm ci --omit=dev
+# Install all dependencies (including local typescript version)
+RUN npm ci
 
 # Copy the rest of the application files
 COPY . .
 
-# Build TypeScript to Javascript
-RUN npm install -g typescript && tsc
+# Build using project's typescript version
+RUN npx tsc
 
 EXPOSE 5000
 

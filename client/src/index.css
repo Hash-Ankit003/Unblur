@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#06070a] text-[#f1f5f9] select-none overflow-x-hidden antialiased;
+    font-family: 'Outfit', 'Inter', sans-serif;
+    /* Ambient vignette background */
+    background-image: 
+      radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.04) 0%, transparent 40%),
+      radial-gradient(circle at 90% 80%, rgba(168, 85, 247, 0.04) 0%, transparent 40%),
+      radial-gradient(circle at 50% 50%, rgba(6, 7, 10, 1) 0%, rgba(3, 4, 6, 1) 100%);
+  }
+}
+
+/* Glassmorphism panel styling with premium tinted border highlights */
+.glass-panel {
+  background: rgba(10, 11, 20, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(99, 102, 241, 0.12); /* Custom Indigo edge glow */
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(168, 85, 247, 0.08); /* Purple border highlight */
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.02);
+}
+
+/* Neon glow effects with soft falloff */
+.glow-primary {
+  box-shadow: 
+    0 0 24px -4px rgba(99, 102, 241, 0.35),
+    0 0 8px -2px rgba(99, 102, 241, 0.2);
+}
+
+.glow-secondary {
+  box-shadow: 
+    0 0 24px -4px rgba(168, 85, 247, 0.35),
+    0 0 8px -2px rgba(168, 85, 247, 0.2);
+}
+
+.glow-accent {
+  box-shadow: 
+    0 0 24px -4px rgba(244, 63, 94, 0.35),
+    0 0 8px -2px rgba(244, 63, 94, 0.2);
+}
+
+.glow-success {
+  box-shadow: 
+    0 0 24px -4px rgba(16, 185, 129, 0.35),
+    0 0 8px -2px rgba(16, 185, 129, 0.2);
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.2);
+  border-radius: 99px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.35);
+}
+
+/* Custom text glow utility with vibrant shadows */
+.text-glow-primary {
+  text-shadow: 
+    0 0 12px rgba(99, 102, 241, 0.5),
+    0 0 2px rgba(99, 102, 241, 0.8);
+}
+
+.text-glow-secondary {
+  text-shadow: 
+    0 0 12px rgba(168, 85, 247, 0.5),
+    0 0 2px rgba(168, 85, 247, 0.8);
+}
+
+/* Guess Feedback Animations */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.input-shake-incorrect {
+  animation: shake 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  border-color: #f43f5e !important;
+  box-shadow: 0 0 18px rgba(244, 63, 94, 0.45) !important;
+}
+
+@keyframes pulse-success {
+  0%, 100% { 
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.25); 
+    border-color: rgba(16, 185, 129, 0.6); 
+  }
+  50% { 
+    box-shadow: 0 0 24px rgba(16, 185, 129, 0.6); 
+    border-color: rgba(52, 211, 153, 1); 
+  }
+}
+
+.input-pulse-success {
+  animation: pulse-success 1.6s infinite ease-in-out;
+  border-color: #10b981 !important;
+}
+
+/* Fire Streak Glow - organic flame pulsing gradient */
+@keyframes fire-glow {
+  0%, 100% {
+    box-shadow: 
+      0 0 8px rgba(249, 115, 22, 0.4), 
+      inset 0 0 6px rgba(239, 68, 68, 0.2);
+    border-color: rgba(249, 115, 22, 0.5);
+  }
+  50% {
+    box-shadow: 
+      0 0 22px rgba(249, 115, 22, 0.85), 
+      inset 0 0 12px rgba(239, 68, 68, 0.5);
+    border-color: rgba(239, 68, 68, 0.8);
+  }
+}
+
+.streak-glow-fire {
+  animation: fire-glow 1.8s infinite ease-in-out;
+  background: rgba(249, 115, 22, 0.03) !important;
+}
+
+/* Floating Emotes */
+@keyframes float-up-emote {
+  0% {
+    transform: translateY(0) scale(0.5) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.25) rotate(-6deg);
+  }
+  55% {
+    transform: translateY(-65px) scale(1.1) rotate(6deg);
+  }
+  100% {
+    transform: translateY(-130px) scale(0.7) rotate(-12deg);
+    opacity: 0;
+  }
+}
+
+.float-emote {
+  position: absolute;
+  pointer-events: none;
+  z-index: 50;
+  font-size: 2.2rem;
+  animation: float-up-emote 1.6s forwards cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Shop Drawer transition */
+.shop-drawer {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}

@@ -207,7 +207,6 @@ export class Room {
   public async startGame() {
     if (this.state !== 'LOBBY') return;
     
-    this.state = 'STARTING';
     this.currentRound = 0;
     this.usedImages.clear();
     
@@ -223,18 +222,32 @@ export class Room {
       p.doublePointsActive = false;
     });
 
-    // If pre-cache is not ready or has been cleared, start it now
+    // If pre-cache is not ready, kick it off now
     if (!this.nextImageToUse) {
       this.preCacheNextRound();
     }
 
-    this.broadcastState();
-    this.broadcastSystemMessage('Game is starting...');
+    const isCacheReady = !this.isPreCaching && !!this.nextImageToUse;
 
-    // Wait 500ms for a smooth transition overlay, then start Round 1 immediately
-    setTimeout(() => {
-      this.startNextRound();
-    }, 500);
+    if (isCacheReady) {
+      // Image already pre-cached and ready — skip the loading screen entirely.
+      // Go to ROUND_ACTIVE almost immediately for a smooth, fast start.
+      this.state = 'STARTING';
+      this.broadcastState();
+      this.broadcastSystemMessage('Game is starting...');
+      setTimeout(() => {
+        this.startNextRound();
+      }, 100);
+    } else {
+      // Image not ready yet — show the loading overlay so players know something
+      // is happening. startNextRound will wait for pre-caching to complete.
+      this.state = 'STARTING';
+      this.broadcastState();
+      this.broadcastSystemMessage('Game is starting...');
+      setTimeout(() => {
+        this.startNextRound();
+      }, 500);
+    }
   }
 
   // Select a random image from dataset based on chosen categories

@@ -1,32 +1,46 @@
-import Jimp from 'jimp';
+import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
-// @ts-ignore
-import JPEG from 'jpeg-js';
-
-// Override the default decoder to increase the resolution limit to 400MP
-// This prevents "maxResolutionInMP limit exceeded" errors on large Wikipedia images
-try {
-  if ((Jimp as any).decoders && !(Jimp as any).decoders['image/jpeg_custom']) {
-    (Jimp as any).decoders['image/jpeg'] = (data: Buffer) => JPEG.decode(data, { 
-      maxResolutionInMP: 400, 
-      maxMemoryUsageInMB: 1024 
-    });
-    // Mark as overridden
-    (Jimp as any).decoders['image/jpeg_custom'] = true;
-    console.log('[Processor] Custom high-resolution JPEG decoder registered successfully.');
-  }
-} catch (err) {
-  console.warn('[Processor] Failed to override default JPEG decoder:', err);
-}
 
 // Cache for generated stages to avoid re-processing identical images
 const cache: Record<string, string[]> = {};
 
 /**
+ * Downloads an image from a URL and returns it as a Buffer.
+ * Uses a 15-second timeout to avoid hanging on slow/dead URLs.
+ */
+async function downloadImage(url: string): Promise<Buffer> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'UnblurGame/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} fetching ${url}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
  * Generates 10 stages of blurred/pixelated base64 JPEG data URIs for a given image.
- * Stage 0 is the most blurred/pixelated.
- * Stage 9 is the original crystal-clear image.
+ * Uses Sharp (native C++ via libvips) which is 10-50x faster than Jimp.
+ * 
+ * Stage 0 is the most blurred/pixelated (tiny image sent to client).
+ * Stage 9 is the original crystal-clear image at full 384px.
+ * 
+ * The client renders stages 0-8 with CSS `image-rendering: pixelated`
+ * so the browser GPU handles upscaling — zero server CPU cost.
  */
 export async function generateBlurStages(source: string, publicFolder: string): Promise<string[]> {
   const cacheKey = source;
@@ -37,68 +51,64 @@ export async function generateBlurStages(source: string, publicFolder: string): 
   const stages: string[] = [];
 
   try {
-    let original: Jimp;
+    let imageBuffer: Buffer;
 
     if (source.startsWith('http://') || source.startsWith('https://')) {
-      console.log(`[Processor] Processing remote image URL: ${source}`);
-      original = await Jimp.read(source);
+      console.log(`[Processor] Downloading remote image: ${source}`);
+      imageBuffer = await downloadImage(source);
     } else {
       const imagePath = path.join(publicFolder, 'images', source);
       if (!fs.existsSync(imagePath)) {
         throw new Error(`Image file not found: ${imagePath}`);
       }
-      console.log(`[Processor] Processing local image path: ${imagePath}`);
-      original = await Jimp.read(imagePath);
+      console.log(`[Processor] Reading local image: ${imagePath}`);
+      imageBuffer = fs.readFileSync(imagePath);
     }
 
-    // Downscale source immediately to max 384x384 to speed up processing and transmission
-    if (original.getWidth() > 384 || original.getHeight() > 384) {
-      original.scaleToFit(384, 384);
-    }
+    // Downscale source to max 384x384 and convert to a reusable JPEG buffer.
+    // sharp() pipelines are single-use, so we create a normalized base buffer first.
+    const normalizedBuffer = await sharp(imageBuffer)
+      .resize(384, 384, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
 
-    // Define pixelation sizes and blur configurations for 10 stages (0 to 9).
-    // KEY OPTIMIZATION: Stages 0-8 are sent as tiny images. The client browser
-    // upscales them using CSS `image-rendering: pixelated` at zero server CPU cost.
-    // This eliminates the expensive server-side nearest-neighbor resize-back-up step,
-    // reduces payload size by ~90%, and prevents event loop blocking.
+    // Stage configurations: size = target pixel width for downscale.
+    // blur = Gaussian sigma applied AFTER downscale (on the tiny image).
+    // -1 = send the full 384px clear image.
     const configurations = [
-      { size: 10, blur: 2 },  // Stage 0: ~0.4KB — tiny, heavily pixelated
-      { size: 14, blur: 1 },  // Stage 1
-      { size: 20, blur: 1 },  // Stage 2
-      { size: 28, blur: 1 },  // Stage 3
-      { size: 38, blur: 1 },  // Stage 4
-      { size: 52, blur: 1 },  // Stage 5
-      { size: 72, blur: 1 },  // Stage 6
-      { size: 120, blur: 0 }, // Stage 7
-      { size: 240, blur: 0 }, // Stage 8
-      { size: -1, blur: 0 },  // Stage 9: original clear image at full 384px
+      { size: 10, blur: 3.0 },   // Stage 0: ~0.3KB — extremely pixelated
+      { size: 14, blur: 2.0 },   // Stage 1
+      { size: 20, blur: 1.5 },   // Stage 2
+      { size: 28, blur: 1.0 },   // Stage 3
+      { size: 38, blur: 0.8 },   // Stage 4
+      { size: 52, blur: 0.5 },   // Stage 5
+      { size: 72, blur: 0.3 },   // Stage 6
+      { size: 120, blur: 0 },    // Stage 7
+      { size: 240, blur: 0 },    // Stage 8
+      { size: -1, blur: 0 },     // Stage 9: full 384px clear reveal
     ];
 
     for (let i = 0; i < configurations.length; i++) {
-      // Yield to the event loop between stages so Socket.io can process
-      // pings, room joins, timer ticks, and guesses without being blocked.
+      // Yield to the event loop between stages so Socket.io stays responsive
       await new Promise<void>(resolve => setImmediate(resolve));
 
       const conf = configurations[i];
+
       if (conf.size === -1) {
-        // Stage 9: The final clear reveal. Send at full resolution.
-        const base64 = await original.getBase64Async(Jimp.MIME_JPEG);
+        // Stage 9: send the full-resolution clear image
+        const base64 = `data:image/jpeg;base64,${normalizedBuffer.toString('base64')}`;
         stages.push(base64);
       } else {
-        const temp = original.clone();
-        
-        // 1. Resize down (very fast — tiny target size)
-        temp.resize(conf.size, Jimp.AUTO);
+        // Build a Sharp pipeline: resize down → optional blur → JPEG encode
+        let pipeline = sharp(normalizedBuffer)
+          .resize(conf.size, conf.size, { fit: 'inside', withoutEnlargement: true });
 
-        // 2. Apply blur on the tiny image (virtually 0ms at this scale)
         if (conf.blur > 0) {
-          temp.blur(conf.blur);
+          pipeline = pipeline.blur(conf.blur);
         }
 
-        // 3. DO NOT resize back up — send the tiny image directly.
-        //    The client renders it with `image-rendering: pixelated` CSS,
-        //    which produces the same blocky pixel aesthetic at GPU speed.
-        const base64 = await temp.getBase64Async(Jimp.MIME_JPEG);
+        const buffer = await pipeline.jpeg({ quality: 70 }).toBuffer();
+        const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
         stages.push(base64);
       }
     }

@@ -5,7 +5,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including local typescript version)
+# Install all dependencies (including Sharp's native binaries for Alpine)
 RUN npm ci
 
 # Copy the rest of the application files

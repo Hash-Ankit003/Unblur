@@ -6,6 +6,7 @@ import { ImageRegistryItem } from './types';
 dotenv.config();
 
 const DATASET_PATH = path.join(__dirname, 'data', 'dataset.json');
+const PROPOSED_DATA_DIR = path.join(__dirname, 'data', 'proposed_data');
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -91,6 +92,7 @@ const WIKI_HEADERS = {
 
 const IMAGE_OVERRIDES: Record<string, string> = {
   'amazon': 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Amazon_logo.svg/640px-Amazon_logo.svg.png',
+  'nike': 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Logo_NIKE.svg',
   'louis pasteur': 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Albert_Edelfelt_-_Louis_Pasteur_-_1885.jpg',
   'orange': 'https://upload.wikimedia.org/wikipedia/commons/b/b0/Orange-Fruit-Pieces.jpg',
   'pikachu': 'https://upload.wikimedia.org/wikipedia/commons/c/ce/Pikachu_in_Yokohama_2023.jpg',
@@ -113,80 +115,68 @@ const IMAGE_OVERRIDES: Record<string, string> = {
   'gateway arch': 'https://upload.wikimedia.org/wikipedia/commons/d/d4/Gateway_Arch_under_clouds.jpg'
 };
 
-// Fetch Image from Wikipedia
-async function resolveWikiImage(keyword: string, category: string): Promise<string> {
-  const key = keyword.toLowerCase().trim();
-  if (IMAGE_OVERRIDES[key]) {
-    console.log(`[Wiki Resolve] Using override for "${keyword}": ${IMAGE_OVERRIDES[key]}`);
-    return IMAGE_OVERRIDES[key];
-  }
+// Batch Wikipedia PageImages resolution
+async function resolveWikiImagesBatch(titles: string[]): Promise<Record<string, string>> {
+  const results: Record<string, string> = {};
+  if (titles.length === 0) return results;
 
-  const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=${encodeURIComponent(keyword)}&redirects=true`;
-  let retries = 2;
-  
-  while (retries >= 0) {
-    try {
-      const res = await fetch(wikiUrl, { headers: WIKI_HEADERS });
-      if (res.status === 429) {
-        console.warn(`[Wiki Resolve] 429 Rate limited for "${keyword}". Retrying in 3 seconds...`);
-        await delay(3000);
-        retries--;
-        continue;
-      }
-      if (!res.ok) throw new Error(`Wiki responded with status ${res.status}`);
-      const data = await res.json() as any;
-      const pages = data?.query?.pages;
-      if (pages) {
-        const pageId = Object.keys(pages)[0];
-        const img = pages[pageId]?.original?.source;
-        if (img && img.startsWith('http')) {
-          return img;
+  const chunkSize = 50;
+  for (let i = 0; i < titles.length; i += chunkSize) {
+    const chunk = titles.slice(i, i + chunkSize);
+    const titlesParam = chunk.map(t => encodeURIComponent(t)).join('|');
+    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles=${titlesParam}&redirects=true`;
+
+    let retries = 3;
+    while (retries >= 0) {
+      try {
+        const res = await fetch(url, { headers: WIKI_HEADERS });
+        if (res.status === 429) {
+          console.warn(`[Wiki Batch] 429 Rate limited. Waiting 4 seconds...`);
+          await delay(4000);
+          retries--;
+          continue;
         }
-      }
-      break;
-    } catch (err) {
-      console.warn(`[Wiki Resolve] Attempt failed for "${keyword}":`, err);
-      retries--;
-      if (retries >= 0) await delay(1000);
-    }
-  }
-
-  // Fallback to LoremFlickr if Wiki fails
-  const catTag = category.toLowerCase().replace(/[^a-z]/g, '');
-  const qTag = keyword.toLowerCase().replace(/[^a-z0-9]/g, ',');
-  return `https://loremflickr.com/640/480/${encodeURIComponent(catTag)},${encodeURIComponent(qTag)}/all`;
-}
-
-// Fetch members of a Wikipedia category
-async function fetchWikiCategoryMembers(catTitle: string, limit: number): Promise<string[]> {
-  const url = `https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(catTitle)}&cmlimit=${limit}&format=json&cmtype=page`;
-  let retries = 2;
-  
-  while (retries >= 0) {
-    try {
-      const res = await fetch(url, { headers: WIKI_HEADERS });
-      if (res.status === 429) {
-        console.warn(`[Wiki Category] 429 Rate limited for "${catTitle}". Retrying in 3 seconds...`);
-        await delay(3000);
+        if (!res.ok) throw new Error(`Wiki batch responded with status ${res.status}`);
+        const data = await res.json() as any;
+        const pages = data?.query?.pages || {};
+        const redirects = data?.query?.redirects || [];
+        
+        const normMap = new Map<string, string>();
+        const normalized = data?.query?.normalized || [];
+        for (const n of normalized) {
+          normMap.set(n.to, n.from);
+        }
+        
+        const redirectMap = new Map<string, string>();
+        for (const r of redirects) {
+          redirectMap.set(r.to, r.from);
+        }
+        
+        for (const pageId in pages) {
+          const page = pages[pageId];
+          const title = page.title;
+          const img = page?.original?.source;
+          if (img && img.startsWith('http')) {
+            let originalTitle = title;
+            if (redirectMap.has(title)) {
+              originalTitle = redirectMap.get(title)!;
+            }
+            if (normMap.has(originalTitle)) {
+              originalTitle = normMap.get(originalTitle)!;
+            }
+            results[originalTitle.toLowerCase().trim()] = img;
+          }
+        }
+        break;
+      } catch (err: any) {
+        console.warn(`[Wiki Batch] Error fetching chunk starting at ${i} (Retries left: ${retries}):`, err.message || err);
         retries--;
-        continue;
+        if (retries >= 0) await delay(2000);
       }
-      if (!res.ok) return [];
-      const data = await res.json() as any;
-      const members = data?.query?.categorymembers || [];
-      return members
-        .map((m: any) => m.title as string)
-        .filter((title: string) => {
-          return !title.startsWith('List of') && !title.includes('list of') && !title.includes('Cricketers');
-        })
-        .map((title: string) => title.replace(/\s*\(.*\)/g, '').trim());
-    } catch (err) {
-      console.error(`[Wiki Category] Attempt failed for ${catTitle}:`, err);
-      retries--;
-      if (retries >= 0) await delay(1000);
     }
+    await delay(150);
   }
-  return [];
+  return results;
 }
 
 // Ingest Country Flags (from REST Countries)
@@ -252,14 +242,14 @@ async function fetchAnimeCharacters(): Promise<ImageRegistryItem[]> {
 
   try {
     console.log(`[Anime] Fetching top characters from Jikan API...`);
-    for (let page = 1; page <= 4; page++) {
+    let page = 1;
+    while (charactersList.length < 520 && page <= 30) {
       const url = `https://api.jikan.moe/v4/top/characters?page=${page}`;
       const response = await fetch(url);
 
       if (response.status === 429) {
-        console.warn(`[Anime] Rate limited. Waiting 3 seconds...`);
-        await delay(3000);
-        page--;
+        console.warn(`[Anime] Rate limited. Waiting 4 seconds...`);
+        await delay(4000);
         continue;
       }
 
@@ -267,6 +257,7 @@ async function fetchAnimeCharacters(): Promise<ImageRegistryItem[]> {
 
       const json = await response.json() as any;
       const data = json.data || [];
+      if (data.length === 0) break;
 
       for (const char of data) {
         const rawName = char.name;
@@ -296,199 +287,251 @@ async function fetchAnimeCharacters(): Promise<ImageRegistryItem[]> {
           difficulty: 'medium'
         });
       }
+      page++;
       await delay(1000);
     }
+    console.log(`[Anime] Ingested ${charactersList.length} Anime Characters.`);
   } catch (err) {
     console.error(`[Anime] Ingest failed:`, err);
   }
   return charactersList;
 }
 
+function generateAliases(answer: string): string[] {
+  const lower = answer.toLowerCase().trim();
+  const aliases = new Set<string>([lower]);
+  const parts = lower.split(/\s+/);
+  if (parts.length > 1) {
+    for (const part of parts) {
+      if (part.length > 2) {
+        aliases.add(part);
+      }
+    }
+  }
+  return Array.from(aliases);
+}
+
+function generateHints(answer: string, baseHint: string): string[] {
+  const parts = answer.trim().split(/\s+/);
+  return [
+    baseHint,
+    `Name has ${parts.length} word${parts.length > 1 ? 's' : ''}`,
+    `Starts with the letter "${answer.trim().charAt(0).toUpperCase()}"`
+  ];
+}
+
+function cleanId(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+// Ingest a Category from proposed JSON files
+async function ingestCategory(
+  jsonFilename: string,
+  categoryName: string,
+  idPrefix: string,
+  baseHint: string,
+  urlCache: Map<string, string>
+): Promise<ImageRegistryItem[]> {
+  const filePath = path.join(PROPOSED_DATA_DIR, jsonFilename);
+  if (!fs.existsSync(filePath)) {
+    console.warn(`[Importer] Proposed JSON file not found: ${filePath}`);
+    return [];
+  }
+
+  const names: string[] = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  console.log(`[Category Ingest: ${categoryName}] Loaded ${names.length} proposed items.`);
+
+  const listToResolve: string[] = [];
+  const items: ImageRegistryItem[] = [];
+
+  // Identify names that need Wikipedia PageImages resolution
+  for (const name of names) {
+    const key = name.toLowerCase().trim();
+    const cachedUrl = urlCache.get(key);
+    if (cachedUrl && cachedUrl.startsWith('http')) {
+      items.push({
+        id: `${idPrefix}_${cleanId(name)}`,
+        answer: name,
+        aliases: generateAliases(name),
+        category: categoryName,
+        fileName: cachedUrl,
+        hints: generateHints(name, baseHint),
+        difficulty: 'medium'
+      });
+    } else {
+      listToResolve.push(name);
+    }
+  }
+
+  if (listToResolve.length > 0) {
+    console.log(`[Category Ingest: ${categoryName}] Resolving ${listToResolve.length} items using Wikipedia PageImages Batch API...`);
+    const batchResults = await resolveWikiImagesBatch(listToResolve);
+    
+    for (const name of listToResolve) {
+      const key = name.toLowerCase().trim();
+      let img = batchResults[key];
+      if (!img || !img.startsWith('http')) {
+        const catTag = categoryName.toLowerCase().replace(/[^a-z]/g, '');
+        const qTag = name.toLowerCase().replace(/[^a-z0-9]/g, ',');
+        img = `https://loremflickr.com/640/480/${encodeURIComponent(catTag)},${encodeURIComponent(qTag)}/all`;
+      }
+
+      items.push({
+        id: `${idPrefix}_${cleanId(name)}`,
+        answer: name,
+        aliases: generateAliases(name),
+        category: categoryName,
+        fileName: img,
+        hints: generateHints(name, baseHint),
+        difficulty: 'medium'
+      });
+    }
+  }
+
+  console.log(`[Category Ingest: ${categoryName}] Completed with ${items.length} items.`);
+  return items;
+}
+
 // Main Runner
 async function runImporter() {
   console.log('🏁 Starting Master Offline Dataset Ingestion CLI...');
 
-  // 1. Read existing dataset.json
-  let registry: ImageRegistryItem[] = [];
+  // 1. Read existing dataset.json & populate cache
+  const urlCache = new Map<string, string>();
   if (fs.existsSync(DATASET_PATH)) {
     try {
-      registry = JSON.parse(fs.readFileSync(DATASET_PATH, 'utf8'));
-      console.log(`Loaded ${registry.length} existing items from dataset.json`);
+      const existing: ImageRegistryItem[] = JSON.parse(fs.readFileSync(DATASET_PATH, 'utf8'));
+      console.log(`Loaded ${existing.length} existing items from dataset.json for URL caching.`);
+      for (const item of existing) {
+        if (item.fileName && item.fileName.startsWith('http')) {
+          urlCache.set(item.answer.toLowerCase().trim(), item.fileName);
+        }
+      }
     } catch (err) {
       console.error('Failed to parse existing dataset.json:', err);
     }
   }
 
-  // Filter out any rebuilt categories to start clean
-  const staticCategories = ['Animals', 'Landmarks', 'Logos', 'Scientists', 'Fruits & Veggies', 'Gaming & Pop Culture'];
-  registry = registry.filter(item => staticCategories.includes(item.category));
-  console.log(`Kept ${registry.length} static core items. Resolving missing image links...`);
+  const registry: ImageRegistryItem[] = [];
 
-  // 2. Resolve missing image URLs for core static items
-  for (let i = 0; i < registry.length; i++) {
-    const item = registry[i];
-    if (!item.fileName || item.fileName.trim() === '') {
-      console.log(`[Resolving Static] "${item.answer}" (${item.category})...`);
-      item.fileName = await resolveWikiImage(item.answer, item.category);
-      await delay(250); // avoid Wiki rate limiting
-    }
-  }
-
-  // 3. Ingest Country Flags (REST Countries)
+  // 2. Ingest Country Flags (REST Countries)
   const flags = await fetchCountryFlags();
   console.log(`[Importer] Ingested ${flags.length} Country Flags.`);
   registry.push(...flags);
 
-  // 4. Ingest Anime Characters (Jikan)
+  // 3. Ingest Anime Characters (Jikan)
   const anime = await fetchAnimeCharacters();
-  console.log(`[Importer] Ingested ${anime.length} Anime Characters.`);
   registry.push(...anime);
 
-  // 5. Ingest Cricketers
-  const cricketersList = [
-    'Virat Kohli', 'Sachin Tendulkar', 'MS Dhoni', 'Rohit Sharma',
-    'Jasprit Bumrah', 'Kapil Dev', 'Sunil Gavaskar', 'Hardik Pandya',
-    'Ravindra Jadeja', 'Chris Gayle', 'AB de Villiers', 'Shane Warne',
-    'Ricky Ponting', 'Brian Lara', 'Muttiah Muralitharan', 'Wasim Akram',
-    'Babar Azam', 'Steve Smith', 'Kane Williamson', 'Joe Root',
-    'Ben Stokes', 'Pat Cummins', 'Mitchell Starc', 'Glenn Maxwell',
-    'Rashid Khan', 'Lasith Malinga', 'Kumar Sangakkara', 'Mahela Jayawardene',
-    'Shakib Al Hasan', 'Shoaib Akhtar'
-  ];
+  // 4. Ingest Cricketers
+  const cricketers = await ingestCategory(
+    'proposed_cricketers.json',
+    'Cricketers',
+    'cricketer',
+    'A famous international cricketer',
+    urlCache
+  );
+  registry.push(...cricketers);
 
-  console.log(`[Cricketers] Ingesting famous international cricketers...`);
-  for (const player of cricketersList) {
-    const img = await resolveWikiImage(player, 'Cricketers');
-    const lower = player.toLowerCase();
-    registry.push({
-      id: `cricketer_${lower.replace(/[^a-z0-9]/g, '_')}`,
-      answer: player,
-      aliases: [lower, player.split(' ').pop()!.toLowerCase()],
-      category: 'Cricketers',
-      fileName: img,
-      hints: [
-        'A famous international cricketer',
-        `Name has ${player.split(' ').length} words`,
-        `Starts with the letter ${player.charAt(0)}`
-      ],
-      difficulty: 'medium'
-    });
-    await delay(50);
-  }
+  // 5. Ingest Footballers
+  const footballers = await ingestCategory(
+    'proposed_footballers.json',
+    'Footballers',
+    'footballer',
+    'A world-famous soccer/football player',
+    urlCache
+  );
+  registry.push(...footballers);
 
-  // 6. Ingest Footballers
-  const footballPlayers = [
-    'Lionel Messi', 'Cristiano Ronaldo', 'Kylian Mbappe', 'Erling Haaland',
-    'Neymar', 'Mohamed Salah', 'Kevin De Bruyne', 'Robert Lewandowski',
-    'Luka Modric', 'Karim Benzema', 'Harry Kane', 'Ronaldinho',
-    'Zinedine Zidane', 'Pele', 'Diego Maradona', 'David Beckham',
-    'Thierry Henry', 'Zlatan Ibrahimovic', 'Luis Suarez', 'Antoine Griezmann'
-  ];
+  // 6. Ingest Bollywood
+  const bollywood = await ingestCategory(
+    'proposed_bollywood.json',
+    'Bollywood',
+    'bollywood',
+    'A famous Bollywood actor/celebrity',
+    urlCache
+  );
+  registry.push(...bollywood);
 
-  console.log(`[Footballers] Resolving player profile images...`);
-  for (const player of footballPlayers) {
-    const img = await resolveWikiImage(player, 'Footballers');
-    const lower = player.toLowerCase();
-    registry.push({
-      id: `footballer_${lower.replace(/[^a-z0-9]/g, '_')}`,
-      answer: player,
-      aliases: [lower, player.split(' ').pop()!.toLowerCase()],
-      category: 'Footballers',
-      fileName: img,
-      hints: [
-        'A world-famous soccer/football player',
-        `Name has ${player.split(' ').length} words`,
-        `Starts with the letter ${player.charAt(0)}`
-      ],
-      difficulty: 'medium'
-    });
-    await delay(50);
-  }
+  // 7. Ingest Cars
+  const cars = await ingestCategory(
+    'proposed_cars.json',
+    'Cars',
+    'car',
+    'An iconic model of car',
+    urlCache
+  );
+  registry.push(...cars);
 
-  // 7. Ingest Bollywood
-  const bollywoodActors = [
-    'Shah Rukh Khan', 'Amitabh Bachchan', 'Salman Khan', 'Aamir Khan',
-    'Priyanka Chopra', 'Deepika Padukone', 'Ranbir Kapoor', 'Ranveer Singh',
-    'Alia Bhatt', 'Hrithik Roshan', 'Katrina Kaif', 'Kareena Kapoor',
-    'Akshay Kumar', 'Aishwarya Rai', 'Kajol'
-  ];
+  // 8. Ingest Monuments
+  const monuments = await ingestCategory(
+    'proposed_monuments.json',
+    'Monuments',
+    'monument',
+    'A famous historical monument or memorial',
+    urlCache
+  );
+  registry.push(...monuments);
 
-  console.log(`[Bollywood] Resolving actor profile images...`);
-  for (const actor of bollywoodActors) {
-    const img = await resolveWikiImage(actor, 'Bollywood');
-    const lower = actor.toLowerCase();
-    registry.push({
-      id: `bollywood_${lower.replace(/[^a-z0-9]/g, '_')}`,
-      answer: actor,
-      aliases: [lower],
-      category: 'Bollywood',
-      fileName: img,
-      hints: [
-        'A famous Bollywood actor/celebrity',
-        `Name has ${actor.split(' ').length} words`,
-        `Starts with the letter ${actor.charAt(0)}`
-      ],
-      difficulty: 'medium'
-    });
-    await delay(50);
-  }
+  // 9. Ingest Animals
+  const animals = await ingestCategory(
+    'proposed_animals.json',
+    'Animals',
+    'animal',
+    'A wild or domestic animal',
+    urlCache
+  );
+  registry.push(...animals);
 
-  // 8. Ingest Cars
-  const iconicCars = [
-    'Tesla Model S', 'Porsche 911', 'Ford Mustang', 'Chevrolet Corvette',
-    'Jeep Wrangler', 'Toyota Prius', 'Ferrari LaFerrari', 'Lamborghini Aventador',
-    'Aston Martin DB11', 'Bugatti Chiron', 'Honda Civic', 'Volkswagen Beetle',
-    'Nissan GT-R', 'Range Rover', 'Audi R8'
-  ];
+  // 10. Ingest Logos
+  const logos = await ingestCategory(
+    'proposed_logos.json',
+    'Logos',
+    'logo',
+    'A famous brand or company logo',
+    urlCache
+  );
+  registry.push(...logos);
 
-  console.log(`[Cars] Resolving car concept designs...`);
-  for (const car of iconicCars) {
-    const img = await resolveWikiImage(car, 'Cars');
-    const lower = car.toLowerCase();
-    registry.push({
-      id: `car_${lower.replace(/[^a-z0-9]/g, '_')}`,
-      answer: car,
-      aliases: [lower, car.split(' ').pop()!.toLowerCase()],
-      category: 'Cars',
-      fileName: img,
-      hints: [
-        'An iconic model of car',
-        `Manufacturer starts with ${car.charAt(0)}`,
-        `Full model name has ${car.split(' ').length} words`
-      ],
-      difficulty: 'easy'
-    });
-    await delay(50);
-  }
+  // 11. Ingest Landmarks
+  const landmarks = await ingestCategory(
+    'proposed_landmarks.json',
+    'Landmarks',
+    'landmark',
+    'A famous tourist attraction or landmark',
+    urlCache
+  );
+  registry.push(...landmarks);
 
-  // 9. Ingest Monuments
-  const monumentsList = [
-    'Christ the Redeemer', 'Mount Rushmore', 'Gateway Arch',
-    'Petra', 'Chichen Itza', 'Parthenon', 'Brandenburg Gate',
-    'Leaning Tower of Pisa', 'Sagrada Familia', 'Angkor Wat',
-    'Kremlin', 'Alhambra', 'Statue of Unity', 'Arc de Triomphe',
-    'Empire State Building', 'Neuschwanstein Castle'
-  ];
+  // 12. Ingest Gaming & Pop Culture
+  const gaming = await ingestCategory(
+    'proposed_gaming.json',
+    'Gaming & Pop Culture',
+    'gaming',
+    'A famous video game, character, or pop culture item',
+    urlCache
+  );
+  registry.push(...gaming);
 
-  console.log(`[Monuments] Resolving monument landmarks...`);
-  for (const monument of monumentsList) {
-    const img = await resolveWikiImage(monument, 'Monuments');
-    const lower = monument.toLowerCase();
-    registry.push({
-      id: `monument_${lower.replace(/[^a-z0-9]/g, '_')}`,
-      answer: monument,
-      aliases: [lower],
-      category: 'Monuments',
-      fileName: img,
-      hints: [
-        'A world-famous historical monument or structure',
-        `Name has ${monument.split(' ').length} words`,
-        `Starts with the letter ${monument.charAt(0)}`
-      ],
-      difficulty: 'medium'
-    });
-    await delay(50);
-  }
+  // 13. Ingest Scientists
+  const scientists = await ingestCategory(
+    'proposed_scientists.json',
+    'Scientists',
+    'scientist',
+    'A pioneering scientist or researcher',
+    urlCache
+  );
+  registry.push(...scientists);
+
+  // 14. Ingest Fruits & Veggies
+  const fruitsVeggies = await ingestCategory(
+    'proposed_fruits_veggies.json',
+    'Fruits & Veggies',
+    'fruit_veg',
+    'A common fruit or vegetable',
+    urlCache
+  );
+  registry.push(...fruitsVeggies);
 
   // Post-process: Force apply overrides to all final items in the registry
   for (const item of registry) {
@@ -499,7 +542,7 @@ async function runImporter() {
     }
   }
 
-  // 10. Write registry to file
+  // 15. Write registry to file
   console.log(`Writing master dataset to ${DATASET_PATH}...`);
   fs.writeFileSync(DATASET_PATH, JSON.stringify(registry, null, 2), 'utf8');
   console.log(`✅ Master Offline Dataset Compilation Complete! Total registry size: ${registry.length} items.`);

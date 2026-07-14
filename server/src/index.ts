@@ -87,11 +87,13 @@ io.on('connection', (socket: Socket) => {
       return callback({ success: false, error: 'Room not found.' });
     }
 
-    if (room.activePlayers.length >= room.config.maxPlayers) {
+    const isReconnecting = data.playerId && room.players.some(p => p.id === data.playerId);
+
+    if (!isReconnecting && room.activePlayers.length >= room.config.maxPlayers) {
       return callback({ success: false, error: 'Room is full.' });
     }
 
-    if (room.state !== 'LOBBY') {
+    if (!isReconnecting && room.state !== 'LOBBY') {
       return callback({ success: false, error: 'Game is already in progress.' });
     }
 

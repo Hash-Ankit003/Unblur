@@ -459,13 +459,13 @@ export class Room {
     });
   }
 
-  // Hints logic based on unblur stages
+  // Hints logic based on unblur stages and timer
   private sendHintsIfNeeded() {
     if (!this.currentImage) return;
     const stage = this.getCurrentBlurStage;
-    if (this.sentStageHints.has(stage)) return;
 
-    if (stage === 0) {
+    // 1. Initial blank hint at the very start
+    if (!this.sentStageHints.has(0)) {
       const lengthHint = this.currentImage.answer.split(' ').map(word => {
         return '_ '.repeat(word.length).trim();
       }).join('   ');
@@ -473,33 +473,54 @@ export class Room {
         type: 'letters',
         text: lengthHint
       });
-      this.sentStageHints.add(stage);
-    } else if (stage === 3) {
-      const initialHint = this.currentImage.answer.split(' ').map(word => {
+      this.sentStageHints.add(0);
+    }
+
+    // 2. First letter hint at 25 seconds remaining
+    if (this.timer <= 25 && !this.sentStageHints.has(991)) {
+      const firstLetterHint = this.currentImage.answer.split(' ').map(word => {
+        if (word.length <= 1) return word;
+        return word.substring(0, 1) + ' _ '.repeat(word.length - 1).trimEnd();
+      }).join('   ');
+      this.io.to(this.roomId).emit('hint_update', {
+        type: 'letters',
+        text: firstLetterHint
+      });
+      this.sentStageHints.add(991);
+    }
+
+    // 3. First and last letter hint at 15 seconds remaining
+    if (this.timer <= 15 && !this.sentStageHints.has(992)) {
+      const firstLastHint = this.currentImage.answer.split(' ').map(word => {
         if (word.length <= 2) {
-          return word.substring(0, 1) + '_ '.repeat(word.length - 1).trim();
+          return word.substring(0, 1) + (word.length === 2 ? ' ' + word.substring(1) : '');
         }
         return word.substring(0, 1) + ' _ '.repeat(word.length - 2) + word.substring(word.length - 1);
       }).join('   ');
       this.io.to(this.roomId).emit('hint_update', {
         type: 'letters',
-        text: initialHint
+        text: firstLastHint
       });
-      this.sentStageHints.add(stage);
-    } else if (stage === 5) {
+      this.sentStageHints.add(992);
+    }
+
+    // 4. Text clues based on blur stages
+    if (stage >= 4 && !this.sentStageHints.has(4)) {
       const clue = this.currentImage.hints[0] || 'A common object';
       this.io.to(this.roomId).emit('hint_update', {
         type: 'clue',
         text: `Clue 1: ${clue}`
       });
-      this.sentStageHints.add(stage);
-    } else if (stage === 7) {
+      this.sentStageHints.add(4);
+    }
+
+    if (stage >= 7 && !this.sentStageHints.has(7)) {
       const clue = this.currentImage.hints[1] || this.currentImage.hints[0] || 'A common object';
       this.io.to(this.roomId).emit('hint_update', {
         type: 'clue',
         text: `Clue 2: ${clue}`
       });
-      this.sentStageHints.add(stage);
+      this.sentStageHints.add(7);
     }
   }
 

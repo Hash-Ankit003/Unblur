@@ -76,15 +76,15 @@ export async function generateBlurStages(source: string, publicFolder: string): 
     // blur = Gaussian sigma applied AFTER downscale (on the tiny image).
     // -1 = send the full 384px clear image.
     const configurations = [
-      { size: 10, blur: 3.0 },   // Stage 0: ~0.3KB — extremely pixelated
-      { size: 14, blur: 2.0 },   // Stage 1
-      { size: 20, blur: 1.5 },   // Stage 2
-      { size: 28, blur: 1.0 },   // Stage 3
-      { size: 38, blur: 0.8 },   // Stage 4
-      { size: 52, blur: 0.5 },   // Stage 5
-      { size: 72, blur: 0.3 },   // Stage 6
-      { size: 120, blur: 0 },    // Stage 7
-      { size: 240, blur: 0 },    // Stage 8
+      { size: 24, blur: 1.5 },   // Stage 0: 24px - shapes and colors visible
+      { size: 36, blur: 1.0 },   // Stage 1: 36px
+      { size: 52, blur: 0.5 },   // Stage 2: 52px
+      { size: 76, blur: 0 },     // Stage 3: 76px - facial features start to emerge
+      { size: 104, blur: 0 },    // Stage 4: 104px
+      { size: 140, blur: 0 },    // Stage 5: 140px
+      { size: 186, blur: 0 },    // Stage 6: 186px
+      { size: 240, blur: 0 },    // Stage 7: 240px
+      { size: 300, blur: 0 },    // Stage 8: 300px
       { size: -1, blur: 0 },     // Stage 9: full 384px clear reveal
     ];
 
